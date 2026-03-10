@@ -104,6 +104,16 @@ gcloud storage buckets create "$uri" \
 
 }
 
+ensure_gitignore_line() {
+
+line="$1"
+
+touch .gitignore
+
+grep -Fxq "$line" .gitignore 2>/dev/null || echo "$line" >> .gitignore
+
+}
+
 cmd_init() {
 
 ensure_git_repo
@@ -166,22 +176,48 @@ die "Unsupported path type"
 
 fi
 
-echo "$path" >> .gitignore
+ensure_gitignore_line "$path"
+
 echo "Pointer written: $ptr"
+echo "Added to .gitignore: $path"
 
 }
 
-pull_file() {
+pull_ptr() {
 
 ptr="$1"
 
-uri="$(grep uri "$ptr" | awk '{print $2}')"
+[[ -f "$ptr" ]] || die "Pointer not found: $ptr"
+
+type="$(awk '/^type:/ {print $2}' "$ptr")"
+uri="$(awk '/^uri:/ {print $2}' "$ptr")"
 
 out="${ptr%.gcs}"
+
+[[ -n "$type" ]] || die "Missing type in pointer: $ptr"
+[[ -n "$uri" ]] || die "Missing uri in pointer: $ptr"
+
+if [[ "$type" == "file" ]]; then
+
+mkdir -p "$(dirname "$out")"
 
 gcloud storage cp "$uri" "$out"
 
 echo "Restored $out"
+
+elif [[ "$type" == "dir" ]]; then
+
+mkdir -p "$out"
+
+gcloud storage rsync --recursive "$uri" "$out"
+
+echo "Restored directory $out"
+
+else
+
+die "Unknown pointer type '$type' in $ptr"
+
+fi
 
 }
 
@@ -189,8 +225,8 @@ pull_dir() {
 
 dir="$1"
 
-find "$dir" -name "*.gcs" | while read ptr; do
-pull_file "$ptr"
+find "$dir" -name "*.gcs" | while read -r ptr; do
+pull_ptr "$ptr"
 done
 
 }
@@ -201,13 +237,13 @@ target="$1"
 
 if [[ "$target" == "--all" ]]; then
 
-find . -name "*.gcs" | while read ptr; do
-pull_file "$ptr"
+find . -name "*.gcs" | while read -r ptr; do
+pull_ptr "$ptr"
 done
 
 elif [[ -f "$target" ]]; then
 
-pull_file "$target"
+pull_ptr "$target"
 
 elif [[ -d "$target" ]]; then
 
@@ -255,6 +291,7 @@ exit 1
 ;;
 
 esac
+
 EOF
 
 ############################################
@@ -270,9 +307,7 @@ EOF
 cat > "$INSTALL_DIR/gcspush" <<'EOF'
 #!/usr/bin/env bash
 set -e
-
 [[ $# -ge 1 ]] || { echo "Usage: gcspush PATH"; exit 1; }
-
 exec git_gcs_artifacts add "$1"
 EOF
 
@@ -317,7 +352,7 @@ fi
 echo
 echo "Installation complete."
 echo
-echo "Available commands:"
+echo "Commands available:"
 echo
 echo "  gcsinit"
 echo "  gcspush <file|dir>"
@@ -329,4 +364,3 @@ echo
 echo "  gcsinit"
 echo "  gcspush data/big.parquet"
 echo "  gcspull data/big.parquet.gcs"
-echo

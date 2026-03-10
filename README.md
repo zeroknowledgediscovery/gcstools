@@ -1,162 +1,207 @@
-```markdown
-# Git–GCS Artifact Tools
+# git-gcs-tools
 
-Lightweight command-line utilities for managing **large files and directories in Google Cloud Storage (GCS)** while keeping Git repositories clean and fast.
+Simple Git helpers for storing large files and directories in **Google Cloud Storage (GCS)** while keeping lightweight pointer files in your repository.
 
-Instead of committing large binaries to Git, these tools store artifacts in GCS and keep **small pointer files (`.gcs`)** in the repository. This avoids repository bloat while preserving reproducibility.
+The tools allow research repositories to stay small while still allowing deterministic recovery of large artifacts such as datasets, model checkpoints, and simulation outputs.
 
-The workflow is intentionally simple and designed to work in **any Git repository**.
+Unlike Git LFS, this system uses **plain pointer files (`.gcs`) and standard GCS buckets** with minimal infrastructure.
 
 ---
 
 # Overview
 
-Large artifacts such as:
+The toolkit provides the following commands:
 
-- datasets
+```
+gcsinit
+gcspush
+gcspull
+gcsstatus
+```
+
+These commands work inside any existing Git repository.
+
+Typical workflow:
+
+```
+gcspush data/big_dataset.parquet
+git add data/big_dataset.parquet.gcs
+git commit -m "store dataset in GCS"
+```
+
+The actual artifact remains on disk locally but is ignored by Git.
+
+---
+
+# Motivation
+
+Research repositories frequently contain artifacts too large for Git:
+
 - model checkpoints
-- simulation outputs
-- intermediate analysis products
-- compiled binaries
+- datasets
+- training outputs
+- simulation artifacts
+- intermediate results
 
-do not belong in Git history.
+This toolkit allows:
 
-This toolset provides a minimal alternative to Git LFS by:
-
-1. Uploading artifacts to **GCS**
-2. Writing a small **pointer file (`.gcs`)** in the repository
-3. Restoring artifacts from pointers when needed
-
-A pointer file typically looks like:
-
-```
-
-version: 1
-type: file
-uri: gs://git-org-repo/data/big_dataset.parquet
-sha256: 3b7f2d...
-size_bytes: 842931234
-
-```
-
----
-
-# Key Features
-
-- Works in **any Git repository**
-- Automatically creates GCS buckets
-- Stores only **pointer files** in Git
-- Supports **files and directories**
-- Automatically updates `.gitignore`
-- Verifies integrity using **SHA256 checksums**
-- Deterministic bucket naming from Git remote
-
----
-
-# Bucket Naming
-
-Buckets are created automatically using the repository remote:
-
-```
-
-git-<orgname>-<reponame>
-
-```
-
-Example:
-
-```
-
-git-openai-research-project
-
-```
-
-If a remote cannot be parsed, the fallback is:
-
-```
-
-git-local-<repo>
-
-```
+- Git repositories to remain lightweight
+- deterministic recovery of artifacts
+- simple storage using Google Cloud Storage
+- minimal dependencies
 
 ---
 
 # Installation
 
-Run the installer:
+Clone the repository and run the install script.
 
 ```
-
-bash install_gcs_git_tools.sh
-
+git clone https://github.com/<org>/git-gcs-tools.git
+cd git-gcs-tools
+bash install_gcs_git_tools
 ```
 
-This installs global commands into:
+This installs the following commands globally:
 
 ```
-
-~/.local/bin
-
-```
-
-Installed commands:
-
-```
-
-git_gcs_artifacts   # backend engine
 gcsinit
 gcspush
 gcspull
 gcsstatus
-
 ```
 
-Ensure your PATH includes:
+They are installed to:
 
 ```
-
 ~/.local/bin
+```
 
+Ensure this directory is in your `PATH`.
+
+---
+
+# Requirements
+
+The following tools must be installed:
+
+- `git`
+- `gcloud` CLI
+- authenticated Google Cloud credentials
+
+Example authentication:
+
+```
+gcloud auth login
+gcloud config set project <your-project>
 ```
 
 ---
 
-# Quick Start
+# Repository Initialization
 
-Inside any Git repository:
+Inside any Git repository run:
 
 ```
-
 gcsinit
-
 ```
 
-Push a file:
+This command:
+
+1. Creates or verifies a GCS bucket
+2. Initializes repository configuration
+3. Prepares `.gitignore` if necessary
+
+The bucket name is automatically inferred from the Git repository:
 
 ```
-
-gcspush data/big_dataset.parquet
-
+git-<org>-<repo>
 ```
 
-Push a directory:
+Example:
 
 ```
-
-gcspush models/run_001
-
+git-zeroknowledgediscovery-zebra_open
 ```
 
-This creates:
+---
+
+# Uploading Files
+
+Upload a file to GCS:
 
 ```
-
-data/big_dataset.parquet.gcs
-models/run_001.gcs
-
+gcspush path/to/file
 ```
 
-The actual data lives in GCS.
+Example:
+
+```
+gcspush models/checkpoint.pt
+```
+
+Behavior:
+
+1. File is uploaded to GCS
+2. A pointer file is created:
+
+```
+models/checkpoint.pt.gcs
+```
+
+3. The original file remains locally
+4. The original path is automatically added to `.gitignore`
+
+Commit only the pointer:
+
+```
+git add models/checkpoint.pt.gcs
+git commit -m "store checkpoint in GCS"
+```
+
+---
+
+# Uploading Directories
+
+Directories can also be uploaded.
+
+```
+gcspush results/run1
+```
+
+Behavior:
+
+- directory is recursively uploaded
+- pointer file created:
+
+```
+results/run1.gcs
+```
+
+The directory remains locally but is added to `.gitignore`.
+
+---
+
+# Pointer File Format
+
+Pointer files are plain text and contain metadata needed to restore the artifact.
+
+Example:
+
+```
+type: file
+uri: gs://git-myorg-myrepo/models/checkpoint.pt
+sha256: 9f86d081884c7d659a2fe...
+```
+
+Directory pointer example:
+
+```
+type: dir
+uri: gs://git-myorg-myrepo/results/run1
+```
+
+These files are small and safe to commit to Git.
 
 ---
 
@@ -165,257 +210,110 @@ The actual data lives in GCS.
 Restore a file:
 
 ```
-
-gcspull data/big_dataset.parquet.gcs
-
+gcspull models/checkpoint.pt.gcs
 ```
 
-Restore everything under a directory:
+Restore a directory:
 
 ```
-
-gcspull models
-
+gcspull results
 ```
 
-Restore all artifacts in a repository:
+Restore all artifacts in the repository:
 
 ```
-
 gcspull --all
-
 ```
 
 ---
 
-# Example Repository Layout
+# Checking Stored Artifacts
 
-Before push:
-
-```
-
-repo/
-├── data/
-│   └── big_dataset.parquet
-└── models/
-└── run_001/
-├── weights.pt
-└── config.json
+List all pointer files in the repository:
 
 ```
-
-After push:
-
-```
-
-repo/
-├── data/
-│   └── big_dataset.parquet.gcs
-└── models/
-└── run_001.gcs
-
-```
-
-`.gitignore` automatically contains:
-
-```
-
-/data/big_dataset.parquet
-/models/run_001
-
-```
-
----
-
-# Pointer Files
-
-Pointer files contain metadata required to restore artifacts.
-
-Example:
-
-```
-
-version: 1
-type: dir
-uri: gs://git-org-repo/models/run_001
-manifest_uri: gs://git-org-repo/models/run_001.**manifest**.tsv
-file_count: 12
-total_bytes: 3240932
-
-```
-
-Directory uploads include a **manifest** containing file hashes.
-
----
-
-# Commands
-
-## `gcsinit`
-
-Initializes repository artifact storage.
-
-```
-
-gcsinit
-
-```
-
-Creates bucket if necessary.
-
----
-
-## `gcspush`
-
-Uploads file or directory to GCS.
-
-```
-
-gcspush <file>
-gcspush <directory>
-
-```
-
-Example:
-
-```
-
-gcspush data/dataset.parquet
-gcspush experiments/run42
-
-```
-
----
-
-## `gcspull`
-
-Restores artifacts.
-
-```
-
-gcspull pointer.gcs
-gcspull directory
-gcspull --all
-
-```
-
----
-
-## `gcsstatus`
-
-Shows pointer files tracked in the repository.
-
-```
-
 gcsstatus
+```
 
+Example output:
+
+```
+models/checkpoint.pt.gcs
+data/big_dataset.parquet.gcs
+results/run1.gcs
 ```
 
 ---
 
-# Typical Workflow
+# Example Workflow
 
-Push large artifacts:
+Initialize repository:
 
 ```
+gcsinit
+```
 
+Push artifacts:
+
+```
 gcspush data/train.parquet
-gcspush models/model_v1
-
+gcspush models/run1
 ```
 
-Commit pointer files:
+Commit pointers:
 
 ```
-
-git add *.gcs
-git commit -m "add dataset and model artifacts"
-
+git add data/train.parquet.gcs
+git add models/run1.gcs
+git commit -m "store artifacts in GCS"
 ```
 
-Clone repository elsewhere and restore:
+Clone on another machine:
 
 ```
-
+git clone <repo>
+cd <repo>
+gcsinit
 gcspull --all
+```
 
+Artifacts will be restored from GCS.
+
+---
+
+# Recommended `.gitignore`
+
+The push command automatically adds pushed paths to `.gitignore`.
+
+Example:
+
+```
+data/train.parquet
+models/run1
+```
+
+Pointer files remain tracked:
+
+```
+*.gcs
 ```
 
 ---
 
-# Integrity Verification
+# Design Philosophy
 
-Artifacts are verified using:
+This tool intentionally avoids complex infrastructure.
 
-```
+Key principles:
 
-SHA256 checksums
-
-```
-
-For directories, each file is validated using a manifest stored in GCS.
-
----
-
-# Requirements
-
-- Git
-- Google Cloud SDK (`gcloud`)
-- Access to a GCP project
-- Permissions to create GCS buckets
-
-Install GCloud SDK:
-
-```
-
-[https://cloud.google.com/sdk/docs/install](https://cloud.google.com/sdk/docs/install)
-
-```
-
-Authenticate:
-
-```
-
-gcloud auth login
-
-```
-
----
-
-# Why Not Git LFS?
-
-Git LFS works well but has limitations:
-
-- server storage quotas
-- performance issues with very large datasets
-- repository coupling
-
-This approach:
-
-- separates **source control** from **artifact storage**
-- leverages scalable cloud storage
-- keeps repositories extremely lightweight
-
----
-
-# Use Cases
-
-This tool is particularly useful for:
-
-- machine learning research
-- large simulation outputs
-- scientific computing
-- data science workflows
-- reproducible pipelines
+- minimal dependencies
+- plain text pointer files
+- repository-agnostic operation
+- deterministic artifact recovery
+- simple integration with existing Git workflows
 
 ---
 
 # License
 
-MIT License
-
----
-
-# Contributing
-
-Issues and pull requests are welcome.
-```
+See `LICENSE` in this repository.
