@@ -4,12 +4,7 @@ set -euo pipefail
 INSTALL_DIR="$HOME/.local/bin"
 
 echo "Installing git-GCS tools into $INSTALL_DIR"
-
 mkdir -p "$INSTALL_DIR"
-
-############################################
-# backend engine
-############################################
 
 cat > "$INSTALL_DIR/git_gcs_artifacts" <<'EOF'
 #!/usr/bin/env bash
@@ -26,10 +21,6 @@ command -v "$1" >/dev/null 2>&1 || die "Missing required command: $1"
 
 ensure_git_repo() {
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "Not inside a git repo."
-}
-
-repo_root() {
-git rev-parse --show-toplevel
 }
 
 sanitize() {
@@ -68,7 +59,7 @@ fi
 
 fi
 
-repo="$(basename "$(repo_root)")"
+repo="$(basename "$(pwd)")"
 echo "local $(sanitize "$repo")"
 
 }
@@ -134,6 +125,7 @@ cmd_add() {
 
 ensure_git_repo
 need_cmd gcloud
+need_cmd git
 
 path="$1"
 
@@ -149,6 +141,8 @@ if [[ -f "$path" ]]; then
 
 uri="gs://$bucket/$path"
 
+echo "Uploading $path to $uri"
+
 gcloud storage cp "$path" "$uri"
 
 sha="$(sha256_file "$path")"
@@ -162,6 +156,8 @@ EOF2
 elif [[ -d "$path" ]]; then
 
 uri="gs://$bucket/$path"
+
+echo "Uploading directory $path to $uri"
 
 gcloud storage cp --recursive "$path" "$uri"
 
@@ -179,7 +175,24 @@ fi
 ensure_gitignore_line "$path"
 
 echo "Pointer written: $ptr"
-echo "Added to .gitignore: $path"
+
+########################################
+# automatic git commit + push
+########################################
+
+git add "$ptr"
+
+commit_msg="store artifact $path in GCS"
+
+git commit -m "$commit_msg" || true
+
+echo "Pushing pointer commit to remote"
+
+git push
+
+echo
+echo "Artifact stored in GCS"
+echo "Pointer committed and pushed"
 
 }
 
@@ -330,19 +343,11 @@ set -e
 exec git_gcs_artifacts status "$@"
 EOF
 
-############################################
-# permissions
-############################################
-
 chmod +x "$INSTALL_DIR/git_gcs_artifacts"
 chmod +x "$INSTALL_DIR/gcsinit"
 chmod +x "$INSTALL_DIR/gcspush"
 chmod +x "$INSTALL_DIR/gcspull"
 chmod +x "$INSTALL_DIR/gcsstatus"
-
-############################################
-# ensure PATH
-############################################
 
 if ! echo "$PATH" | grep -q "$INSTALL_DIR"; then
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
@@ -359,7 +364,7 @@ echo "  gcspush <file|dir>"
 echo "  gcspull <pointer.gcs|dir|--all>"
 echo "  gcsstatus"
 echo
-echo "Example usage:"
+echo "Example workflow:"
 echo
 echo "  gcsinit"
 echo "  gcspush data/big.parquet"

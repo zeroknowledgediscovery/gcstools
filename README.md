@@ -1,3 +1,4 @@
+
 # git-gcs-tools
 
 Simple Git helpers for storing large files and directories in **Google Cloud Storage (GCS)** while keeping lightweight pointer files in your repository.
@@ -35,14 +36,7 @@ The actual artifact remains on disk locally but is ignored by Git.
 
 # Motivation
 
-Research repositories frequently contain artifacts too large for Git:
-
-- model checkpoints
-- datasets
-- training outputs
-- simulation artifacts
-- intermediate results
-
+Research repositories frequently contain artifacts too large for Git.
 This toolkit allows:
 
 - Git repositories to remain lightweight
@@ -300,20 +294,17 @@ Pointer files remain tracked:
 
 ---
 
-# Design Philosophy
-
-This tool intentionally avoids complex infrastructure.
-
-Key principles:
-
-- minimal dependencies
-- plain text pointer files
-- repository-agnostic operation
-- deterministic artifact recovery
-- simple integration with existing Git workflows
-
----
-
 # License
 
-See `LICENSE` in this repository.
+
+This project is licensed under the **GNU General Public License v3.0 (GPL-3.0)**.
+
+Copyright (C) 2026
+
+This program is free software: you can redistribute it and/or modify it under the terms of the **GNU General Public License** as published by the Free Software Foundation, either **version 3 of the License**, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful, but **WITHOUT ANY WARRANTY**; without even the implied warranty of **MERCHANTABILITY** or **FITNESS FOR A PARTICULAR PURPOSE**. See the GNU General Public License for more details.
+
+A copy of the license should be included in this repository in the file `LICENSE`. If not, see:
+
+https://www.gnu.org/licenses/gpl-3.0.html
