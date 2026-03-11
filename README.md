@@ -10,7 +10,7 @@ Unlike Git LFS, this system uses **plain pointer files (`.gcs`) and standard GCS
 # Quickstart
 
 + clone this repo to a linux machine (the OS dependency will be removed in future releases)
-+ Run the installation script
++ Run the installation script `install_gcs_git_tools`
 + In your target repo
   - run `gcsinit` once
   - then `gcspush filepath/directory`
