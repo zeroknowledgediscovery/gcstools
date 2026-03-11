@@ -2,12 +2,18 @@
 # git-gcs-tools
 
 Simple Git helpers for storing large files and directories in **Google Cloud Storage (GCS)** while keeping lightweight pointer files in your repository.
-
 The tools allow research repositories to stay small while still allowing deterministic recovery of large artifacts such as datasets, model checkpoints, and simulation outputs.
-
 Unlike Git LFS, this system uses **plain pointer files (`.gcs`) and standard GCS buckets** with minimal infrastructure.
 
 ---
+
+# Quickstart
+
++ clone this repo to a linux machine (the OS dependency will be removed in future releases)
++ Run the installation script
++ In your target repo
+  - run `gcsinit` once
+  - then `gcspush filepath/directory
 
 # Overview
 
