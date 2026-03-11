@@ -13,7 +13,7 @@ Unlike Git LFS, this system uses **plain pointer files (`.gcs`) and standard GCS
 + Run the installation script
 + In your target repo
   - run `gcsinit` once
-  - then `gcspush filepath/directory
+  - then `gcspush filepath/directory`
 
 # Overview
 
