@@ -250,8 +250,6 @@ cmd_add() {
   rel="$(rel_to_repo "$local_path")"
   base="$(basename "$rel")"
 
-  # Important: default pointer is created next to the target artifact,
-  # not in the caller's current working directory.
   if [[ -z "$pointer" ]]; then
     pointer="$rel.gcs"
   fi
@@ -331,8 +329,12 @@ POINTEREOF
 
   if [[ $do_commit -eq 1 ]]; then
     git add "$pointer_rel" .gitignore
-    git commit -m "Add GCS pointer for $rel" || true
-    echo "Committed pointer."
+    if ! git diff --cached --quiet -- "$pointer_rel" .gitignore 2>/dev/null; then
+      git commit -m "Add GCS pointer for $rel" || true
+      echo "Committed pointer."
+    else
+      echo "No staged changes to commit for $pointer_rel"
+    fi
   fi
 
   if [[ $do_push -eq 1 ]]; then
@@ -506,17 +508,149 @@ EOF
 cat > "$INSTALL_DIR/gcspush" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+
 backend="$(command -v git_gcs_artifacts)"
 [[ -n "$backend" ]] || { echo "ERROR: git_gcs_artifacts not found on PATH"; exit 1; }
 
-[[ $# -ge 1 ]] || {
-  echo "Usage: gcspush PATH [extra args]"
-  exit 1
+usage() {
+  cat <<'EOH'
+Usage:
+  gcspush PATH
+  gcspush PATH --no-commit
+  gcspush PATH --no-push
+  gcspush PATH --no-commit --no-push
+  gcspush -r DIRECTORY
+  gcspush -r DIRECTORY -t 25
+  gcspush -r DIRECTORY --threshold-mb 25
+  gcspush -r DIRECTORY --no-push
+
+Behavior:
+  - Default mode pushes one file or one directory.
+  - Recursive mode scans a directory and pushes each file whose size is >= threshold.
+  - Threshold default is 10 MB.
+  - Default behavior is upload + commit + push.
+  - Recursive mode does a single batch commit and single push at the end.
+EOH
 }
 
-path="$1"
-shift
-exec "$backend" add --local "$path" "$@"
+recursive=0
+threshold_mb=10
+target=""
+do_commit=1
+do_push=1
+pass_args=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -r|--recursive)
+      recursive=1
+      shift
+      ;;
+    -t|--threshold-mb)
+      [[ $# -ge 2 ]] || { echo "ERROR: missing value for $1"; exit 1; }
+      threshold_mb="$2"
+      shift 2
+      ;;
+    --no-commit)
+      do_commit=0
+      shift
+      ;;
+    --no-push)
+      do_push=0
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      if [[ -z "$target" ]]; then
+        target="$1"
+      else
+        pass_args+=("$1")
+      fi
+      shift
+      ;;
+  esac
+done
+
+[[ -n "$target" ]] || { usage; exit 1; }
+
+threshold_re='^[0-9]+([.][0-9]+)?$'
+[[ "$threshold_mb" =~ $threshold_re ]] || { echo "ERROR: threshold must be numeric"; exit 1; }
+
+if [[ "$recursive" -eq 0 ]]; then
+  backend_flags=()
+  [[ "$do_commit" -eq 1 ]] && backend_flags+=(--commit)
+  [[ "$do_push" -eq 1 ]] && backend_flags+=(--push)
+  exec "$backend" add --local "$target" "${backend_flags[@]}" "${pass_args[@]}"
+fi
+
+[[ -d "$target" ]] || { echo "ERROR: recursive mode requires a directory"; exit 1; }
+git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "ERROR: run inside a git repo"; exit 1; }
+
+repo_root="$(git rev-parse --show-toplevel)"
+old_pwd="$(pwd)"
+
+threshold_bytes="$(python3 - <<PY
+print(int(float("$threshold_mb") * 1024 * 1024))
+PY
+)"
+
+pushed_any=0
+pointer_paths=()
+gitignore_changed=0
+
+while IFS= read -r -d '' f; do
+  [[ "$f" == *.gcs ]] && continue
+
+  size="$(stat -c '%s' "$f")"
+  if (( size >= threshold_bytes )); then
+    pushed_any=1
+    echo "Pushing: $f"
+    "$backend" add --local "$f" --no-commit --no-push "${pass_args[@]}"
+
+    rel="$(realpath "$f")"
+    rel="${rel#$repo_root/}"
+    pointer_paths+=("$rel.gcs")
+  fi
+done < <(find "$target" -type f -print0)
+
+if [[ "$pushed_any" -eq 0 ]]; then
+  echo "No files at or above ${threshold_mb} MB found under $target"
+  exit 0
+fi
+
+if [[ -f "$repo_root/.gitignore" ]]; then
+  if ! git diff --quiet -- "$repo_root/.gitignore" 2>/dev/null; then
+    gitignore_changed=1
+  fi
+fi
+
+if [[ "$do_commit" -eq 1 ]]; then
+  cd "$repo_root"
+  add_args=()
+  for p in "${pointer_paths[@]}"; do
+    [[ -f "$p" ]] && add_args+=("$p")
+  done
+  [[ "$gitignore_changed" -eq 1 ]] && add_args+=(".gitignore")
+
+  if [[ "${#add_args[@]}" -gt 0 ]]; then
+    git add "${add_args[@]}"
+    if ! git diff --cached --quiet -- "${add_args[@]}" 2>/dev/null; then
+      git commit -m "Add GCS pointers under ${target}"
+      echo "Committed pointers."
+    else
+      echo "No staged changes to commit."
+    fi
+  fi
+  cd "$old_pwd"
+fi
+
+if [[ "$do_push" -eq 1 ]]; then
+  git -C "$repo_root" push
+  echo "Pushed git changes."
+fi
 EOF
 
 cat > "$INSTALL_DIR/gcspull" <<'EOF'
@@ -596,6 +730,15 @@ echo
 echo "Pointer behavior:"
 echo "  gcspush xx/yy/zz.csv   -> xx/yy/zz.csv.gcs"
 echo "  gcspush models/run_01  -> models/run_01.gcs"
+echo
+echo "Recursive behavior:"
+echo "  gcspush -r DIR                 # threshold 10 MB, single batch commit+push"
+echo "  gcspush -r DIR -t 25           # threshold 25 MB"
+echo "  gcspush -r DIR --no-push       # commit only"
+echo "  gcspush -r DIR --no-commit     # upload only"
+echo
+echo "Default behavior:"
+echo "  gcspush PATH                   # upload + commit + push"
 echo
 echo "Open a new shell or run:"
 echo "  export PATH=\"\$HOME/.local/bin:\$PATH\""
